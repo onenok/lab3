@@ -62,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function createSafePlatformFunc() {
         // 原有參數
-        const baseY = 100 + Math.random() * 80;          // 100~180
+        const baseY = 150 + Math.random() * 50;          // 100~180
         const maxAmp = 120;
         const amp1 = Math.random() * maxAmp * 0.7 + 40;
         const amp2 = Math.random() * 50 + 20;
@@ -77,8 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 定義未平移的原始函數
         const rawFunc = (x) => {
-            return baseY
-                + (amp1 * scale) * Math.sin(x / freq1 + phase1)
+            return(amp1 * scale) * Math.sin(x / freq1 + phase1)
                 + (amp2 * scale) * Math.cos(x / freq2 + phase2);
         };
 
@@ -91,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 先粗略找一個接近 0 的點
         let minDiff = Infinity;
         let bestX = 0;
-
+        let flag_search = false;
         for (let dx = -maxSearch; dx <= maxSearch; dx += step) {
             const y = rawFunc(dx);
             const diff = Math.abs(y - 0);
@@ -100,18 +99,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 bestX = dx;
             }
             // 如果已經非常接近 0，可以提早結束
-            if (diff < 0.01) break;
+            if (diff < 0.01) {
+                flag_search = true;
+                break;
+            }
         }
+        if (!flag_search) {
+            console.warn("can't find the x when y=0, found x: ", bestX, ", the y of it: ", minDiff);
+        };
 
         x_offset = bestX;
 
         // 最終函數：把 x 加上偏移，讓 func(0) = rawFunc(x_offset + 0) ≈ 0
         const func = (x) => {
             const shiftedX = x + x_offset;
-            let y = rawFunc(shiftedX);
+            let y = (amp1 * scale) * Math.sin(shiftedX / freq1 + phase1)
+                + (amp2 * scale) * Math.cos(shiftedX / freq2 + phase2);
 
             // 保持高度限制
-            y = Math.max(50, Math.min(y, heightLimit));
+            y = Math.round(Math.max(0, Math.min(y, heightLimit)) + baseY);
             return y;
         };
 
@@ -133,6 +139,21 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             startHeight: func(0).toFixed(2)     // 應該接近 0.00
         };
+    }
+    function drawDashedRect(ctx, x, y, width, height, dashArray = [6, 6], lineWidth = 2, color = '#000') {
+        ctx.save();                // 保存狀態，避免影響其他繪圖
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+
+        // 設定虛線樣式：[實線長度, 空白長度]
+        // [6,6] = 6像素實線 + 6像素空白，重複
+        ctx.setLineDash(dashArray);
+
+        ctx.strokeRect(x, y, width, height);
+
+        ctx.setLineDash([]);       // 恢復成實線（重要！）
+        ctx.restore();             // 恢復狀態
     }
 
     // === helper function end ===
@@ -250,7 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (this.vy <= 0 &&
                             playerBottom < eTop &&
                             playerTop > eTop &&
-                            (eTop - playerBottom <= this.size/4 || lastPlayerBottom >= eTop)) {  // 上一幀還在上面或剛好在邊界
+                            (eTop - playerBottom <= this.size / 4 || lastPlayerBottom >= eTop)) {  // 上一幀還在上面或剛好在邊界
                             this.y = eTop;
                             this.vy = 0;
                             return true;  // 落地成功，直接返回
@@ -369,6 +390,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             ctx.fillStyle = this.color;
             ctx.fillRect(drawX, canvas.height - drawY, this.size, -this.size);
+            drawDashedRect(ctx, this.lastX, canvas.height - this.lastY, this.size, -this.size, [8, 4], 3, 'green');
+            drawDashedRect(ctx, this.x, canvas.height - this.y, this.size, -this.size, [8, 4], 3, 'blue');
         }
     }
 
@@ -387,8 +410,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.x.push(xValue);
                 this.xEnd.push(xValue + width);
                 const yValue = func(i) + startY;
-                this.y.push(yValue);
-                this.yEnd.push(yValue + height);
+                this.y.push(yValue - height);
+                this.yEnd.push(yValue);
             }
         }
         draw() {
@@ -396,7 +419,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.fillStyle = this.color;
                 ctx.fillRect(this.x[i], canvas.height - this.y[i], this.width, -this.height);
                 ctx.fillStyle = 'black';
-                ctx.fillText(`${this.x[i]}, ${this.y[i]}`, this.x[i], canvas.height - this.y[i] - this.height);
+                ctx.fillText(`${this.x[i]}, ${this.yEnd[i]}`, this.x[i], canvas.height - this.y[i] - this.height);
             }
         }
     }
@@ -405,7 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // === game init ===
     const result = createSafePlatformFunc();
     const camera = new Camera();
-    const bar = new bars(result.func, 400, 100, 50, 200, 50, 'blue');
+    const bar = new bars(result.func, 400, 0, 100, 200, 50, 'blue');
     const player = new Player(0, 500, 30, { color: 'red', cameraBind: camera, collisionEnities: [bar] });
     // === game init end ===
 
