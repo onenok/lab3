@@ -3,10 +3,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // === canvas setup ===
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
-
+    let resizing = true;
+    let resizeTimer = null;
     function resizeCanvas() {
+        clearTimeout(resizeTimer);
+        resizing = true;
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
+        resizeTimer = setTimeout(resizing = false, 100)
     }
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
@@ -17,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ACCELERATION_TIME = 0.2;
     const CoyoteTOLERANCE = 0.1; // Coyote Time
     const jumpBufferTOLERANCE = 0.15; // Jump Buffer Time
-    let fixedDt = 1 / 60; // 20 TPS
+    let fixedDt = 1 / 60; //
     let accumulator = 0;
     let lastTime = performance.now();
     let jumpBufferTimer = 0;
@@ -60,64 +64,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const k = 1 - Math.exp(-dt / tau);
         return from + k * (to - from);
     }
-    function createSafePlatformFunc() {
-        // 原有參數
-        const baseY = 150 + Math.random() * 50;          // 100~180
-        const maxAmp = 120;
-        const amp1 = Math.random() * maxAmp * 0.7 + 40;
-        const amp2 = Math.random() * 50 + 20;
-        const freq1 = Math.random() * 50 + 40;
-        const freq2 = freq1 * (Math.random() * 1.8 + 1.2);
-        const phase1 = Math.random() * Math.PI * 2;
-        const phase2 = Math.random() * Math.PI * 2;
-
-        const theoreticalMax = baseY + amp1 + amp2 + 20;
-        const heightLimit = 680;
-        const scale = theoreticalMax > heightLimit ? heightLimit / theoreticalMax : 1;
-
-        // 定義未平移的原始函數
-        const rawFunc = (x) => {
-            return(amp1 * scale) * Math.sin(x / freq1 + phase1)
-                + (amp2 * scale) * Math.cos(x / freq2 + phase2);
-        };
-
-        // 目標：找到一個 x_offset，讓 rawFunc(x_offset) ≈ 0
-        // 使用二分法或簡單迭代來找（這裡用簡單的數值搜尋）
-        let x_offset = 0;
-        const step = 0.1;          // 搜尋精度
-        const maxSearch = 1000;    // 最大搜尋距離（避免無限迴圈）
-
-        // 先粗略找一個接近 0 的點
-        let minDiff = Infinity;
-        let bestX = 0;
-        let flag_search = false;
-        for (let dx = -maxSearch; dx <= maxSearch; dx += step) {
-            const y = rawFunc(dx);
-            const diff = Math.abs(y - 0);
-            if (diff < minDiff) {
-                minDiff = diff;
-                bestX = dx;
-            }
-            // 如果已經非常接近 0，可以提早結束
-            if (diff < 0.01) {
-                flag_search = true;
-                break;
-            }
+    function createSafePlatformFunc(
+        {
+            baseYValues = [150, 200],
+            maxAmpValue = 120,
+            amp1Value = [0.7, 40],
+            amp2Value = [50, 20],
+            freq1Value = [50, 40],
+            freq2Value = [1.8, 1.2],
+            heightLimitValue = 680,
+            heightLimitBuffer = 20
         }
-        if (!flag_search) {
-            console.warn("can't find the x when y=0, found x: ", bestX, ", the y of it: ", minDiff);
-        };
+    ) {
+        // 原有參數
+        const baseY = baseYValues[0] + Math.random() * (baseYValues[1] - baseYValues[0]);
+        const maxAmp = maxAmpValue;
+        const amp1 = Math.random() * maxAmp * amp1Value[0] + amp1Value[1];
+        const amp2 = Math.random() * amp2Value[0] + amp2Value[1];
+        const freq1 = Math.random() * freq1Value[0] + freq1Value[1];
+        const freq2 = freq1 * (Math.random() * freq2Value[0] + freq2Value[1]);
+        const phase1 = -Math.PI / 2;
+        const phase2 = Math.PI;
 
-        x_offset = bestX;
-
-        // 最終函數：把 x 加上偏移，讓 func(0) = rawFunc(x_offset + 0) ≈ 0
+        const theoreticalMax = baseY + 2 * (amp1 + amp2);
+        const heightLimit = heightLimitValue;
+        const scale = theoreticalMax > heightLimit ? (heightLimit - heightLimitBuffer) / theoreticalMax : 1;
         const func = (x) => {
-            const shiftedX = x + x_offset;
-            let y = (amp1 * scale) * Math.sin(shiftedX / freq1 + phase1)
-                + (amp2 * scale) * Math.cos(shiftedX / freq2 + phase2);
-
-            // 保持高度限制
-            y = Math.round(Math.max(0, Math.min(y, heightLimit)) + baseY);
+            const f = ((amp1 * scale) - ((baseY * (1 - scale)) / 4)) * (Math.sin(x / freq1 + phase1) + 1) + baseY / 2;
+            const g = ((amp2 * scale) - ((baseY * (1 - scale)) / 4)) * (Math.cos(x / freq2 + phase2) + 1) + baseY / 2;
+            const y = f + g;
             return y;
         };
 
@@ -125,6 +100,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             func: func,
             params: {
+                funcStr: `
+            const f = ((${amp1} * ${scale}) - ((${baseY} * (1 - ${scale})) / 4)) * (Math.sin(x / ${freq1} + ${phase1}) + 1) + ${baseY} / 2;
+            const g = ((${amp2} * ${scale}) - ((${baseY} * (1 - ${scale})) / 4)) * (Math.cos(x / ${freq2} + ${phase2}) + 1) + ${baseY} / 2;
+            y = f + g;
+                `,
                 baseY,
                 amp1,
                 amp2,
@@ -132,12 +112,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 freq2,
                 phase1: phase1.toFixed(4),
                 phase2: phase2.toFixed(4),
-                scale: scale.toFixed(4),
                 theoreticalMax: theoreticalMax.toFixed(2),
                 heightLimit,
-                x_offset: x_offset.toFixed(4)   // 記錄平移了多少
+                heightLimitBuffer,
+                scale: scale.toFixed(4),
             },
-            startHeight: func(0).toFixed(2)     // 應該接近 0.00
+
         };
     }
     function drawDashedRect(ctx, x, y, width, height, dashArray = [6, 6], lineWidth = 2, color = '#000') {
@@ -180,6 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
     class Player {
         constructor(x, y, size, { color = 'red', cameraBind = null, collisionEnities = [] } = {}) {
             this.x = x; this.y = y; // bottom y = 0 // pointer at bottom left corner
+            this.drawX = x; this.drawY = y; // alpha position
             this.vx = 0; this.vy = 0; // vy > 0 means moving up
             this.size = size; this.color = color;
             this.onGround = false;
@@ -381,15 +362,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         draw(ctx, alpha) {
-            let drawX = this.lastX + (this.x - this.lastX) * alpha;
-            let drawY = this.lastY + (this.y - this.lastY) * alpha;
+            this.drawX = this.lastX + (this.x - this.lastX) * alpha;
+            this.drawY = this.lastY + (this.y - this.lastY) * alpha;
             // Camera
             if (this.camera) {
-                this.camera.x = drawX;
+                this.camera.x = this.drawX;
                 this.camera.apply(ctx, this);
             }
             ctx.fillStyle = this.color;
-            ctx.fillRect(drawX, canvas.height - drawY, this.size, -this.size);
+            ctx.fillRect(this.drawX, canvas.height - this.drawY, this.size, -this.size);
             drawDashedRect(ctx, this.lastX, canvas.height - this.lastY, this.size, -this.size, [8, 4], 3, 'green');
             drawDashedRect(ctx, this.x, canvas.height - this.y, this.size, -this.size, [8, 4], 3, 'blue');
         }
@@ -426,7 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // === class construction end ===
 
     // === game init ===
-    const result = createSafePlatformFunc();
+    const result = createSafePlatformFunc({ heightLimitValue: canvas.height/2, heightLimitBuffer: 30 + 20 });
     const camera = new Camera();
     const bar = new bars(result.func, 400, 0, 100, 200, 50, 'blue');
     const player = new Player(0, 500, 30, { color: 'red', cameraBind: camera, collisionEnities: [bar] });
@@ -434,6 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // === game loop ===
     function gameLoop() {
+        if (resizing) {requestAnimationFrame(gameLoop);}
         let now = performance.now();
         let frameTime = (now - lastTime) / 1000;
         lastTime = now;
